@@ -1,0 +1,145 @@
+---
+title: "course_project_ML"
+author: "Ananya Tripathi"
+date: "June 30, 2016"
+output: html_document
+---
+
+
+# Introduction
+The goal of the project is to predict the manner in which the participants did the exercise which is shown by the classe variable.The data for this project comes from:<http://groupware.les.inf.puc-rio.br/har.>
+
+##Required Packages
+
+```{r packages}
+library(data.table)
+library(caret)
+library(randomForest)
+library(lubridate)
+setwd("C:/PNY")
+r_data <- fread("pml-training.csv")
+rt <- fread("pml-testing.csv")
+r_data <- as.data.frame(r_data)
+inTrain <- createDataPartition(r_data$classe, p=0.8, list = FALSE)
+r <- r_data[inTrain,]
+r_test <- r_data[-inTrain,]
+```
+
+##Removing columns
+
+We now find the columns with NA,#DIV/0! and "" values and remove from the training data set
+
+```{r index}
+sum_na <- apply(r,2,function(x){((sum((is.na(x))*1)))}) 
+index_na <- which(sum_na!=0)
+names(index_na) <- NULL
+
+sum_txt <- apply(r,2,function(x){((sum((x=="#DIV/0!")*1)))}) 
+index_txt <- which(sum_txt!=0)
+names(index_txt)<- NULL
+
+sum_empty <- apply(r,2,function(x){((sum((as.character(x)=="")*1)))}) 
+index_empty <- which(sum_empty!=0)
+names(index_empty)<- NULL
+
+input <- unique(c(index_na,index_txt,index_empty))
+
+read <- r[,-input]
+```
+
+##More cleaning
+Now the columns with redundant values are removed, the classe column is converted to a factor variable,day of the week and time is extracted from "cvtd_timestamp" using lubridate package and a new data frame "data" is made. The classe column is removed before preprocessing the data.
+
+```{r clean}
+read$classe <- as.factor(read$classe)
+read_final <- read[,-c(1,2,6)]
+
+library(lubridate)
+
+date <- dmy(substr(r$cvtd_timestamp,1,10))
+time <- hm(substr(r$cvtd_timestamp,12,16))
+day <- wday(date)
+hour <- hour(time)
+data <- data.frame(read_final[,-c(3,57)],day,hour)
+```
+
+##Model Building
+
+In the next step, principal component analysis is carried out to make new columns which explain most variation in the dataset prepared till now. We then apply the random forest model and carry out cross
+validation with a value of 5. The model generated shows that the final value used for the model was mtry = 2, which generated the accuracy of 0.9723609.
+
+```{r model}
+prep <- preProcess(data,method="pca")
+data_prep <- predict(prep,data)
+classe <- read_final$classe
+mdl_data <- data.frame(classe,data_prep)
+
+control <- trainControl(method = 'cv', number = 5)
+model_rf <- train(classe~.,method="rf",trControl = control, data=mdl_data)
+model_rf
+```
+The in sample error rate can be seen from the confusion matrix generated.There is no classification error for the training model.
+```{r confusion}
+confusionMatrix(predict(model_rf),r$classe)
+```
+
+##Predicting on r_test data to find out of sample error
+
+Then test data taken from the pml_training is read. As the columns to be removed are already calculated for train data, same columns can be removed from test data. Weekday and time is extracted from the test data, a new data frame is made, preprocessing is done using the pca model of the TRAIN data and prediction is carried out using the model for train data.
+
+```{r test}
+readt <- r_test[,-input]
+readt_final <- readt[,-c(1,2,6)]
+
+tdate <- dmy(substr(r_test$cvtd_timestamp,1,10))
+ttime <- hm(substr(r_test$cvtd_timestamp,12,16))
+day <- wday(tdate)
+hour <- hour(ttime)
+tdata <- data.frame(readt_final[,-c(3,57)],day,hour)
+tdata_prep <- predict(prep,tdata)
+
+model_test_rf <- predict(model_rf,tdata_prep)
+confusionMatrix(model_test_rf, r_test$classe)
+```
+
+The out of sample accuracy comes out to be 0.985. Hence, the out of sample error is 1.5%
+
+##Prediction on test data
+
+```{r test_final}
+rt <- as.data.frame(rt)
+rt <- rt[,-160]
+readT <- rt[,-input]
+readT_final <- readT[,-c(1,2,6)]
+
+Tdate <- dmy(substr(rt$cvtd_timestamp,1,10))
+Ttime <- hm(substr(rt$cvtd_timestamp,12,16))
+day <- wday(Tdate)
+hour <- hour(Ttime)
+Tdata <- data.frame(readT_final[,-c(3)],day,hour)
+Tdata_prep <- predict(prep,Tdata)
+
+
+```
+
+##Submission of the predicted answers using Coursera provided code.
+
+```{r submit}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+model_Test_rf <- predict(model_rf,Tdata_prep)
+
+model_Test_rf 
+
+pml_write_files(model_Test_rf)
+
+```
+
+
+
